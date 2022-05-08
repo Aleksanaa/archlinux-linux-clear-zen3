@@ -1,0 +1,61 @@
+name: build
+on:
+  workflow_dispatch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux
+      options: --privileged
+      volumes:
+        - /sys/fs/cgroup:/sys/fs/cgroup
+    env:
+      WorkDir: /__w/archlinux-linux-clear-zen3/archlinux-linux-clear-zen3
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+      
+    - name: Prepare environment
+      run:  |  
+             pacman -Syu --needed --noconfirm base-devel git
+             
+             # unlock the limitation of makepkg
+             sed -i '/E_ROOT/d' /usr/bin/makepkg
+             
+             # apply makepkg.conf && pacman.conf
+             cd $WorkDir
+             mv makepkg.conf /etc/makepkg.conf
+             mv pacman.conf /etc/pacman.conf
+             
+    - name: Import signatures
+      run:  |  
+             echo '${{secrets.GPG_PRIVATE_KEY}}' >> private.key
+             gpg --allow-secret-key-import --expert --import private.key
+             gpg --list-keys
+             rm -r private.key
+             
+    - name: Build package
+      run:  |
+             cd $WorkDir
+             git clone https://aur.archlinux.org/linux-clear.git
+             cd linux-clear
+             patch PKGBUILD ../pkgbuild.patch
+             makepkg -s --noconfirm --skippgpcheck
+             mkdir /artifacts
+             mv *.pkg.tar.zst* /artifacts
+             
+    - name: Print sha256sums
+      run:  | 
+             cd /artifacts
+             for file in ./*
+             do
+               sha256sum $file
+             done
+             
+    - name: Publish artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: build-artifacts
+        path: /artifacts
